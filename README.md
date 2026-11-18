@@ -35,11 +35,18 @@ Command line:
 echo "hello" | ./speak - hi.mp3   # text from a pipe
 ./speak -p notes.txt              # also play it when done
 ./speak -v lessac notes.txt       # another voice
+./speak -d 5 notes.txt            # lower the pitch by 5% (speed unchanged)
+./speak -d 0 notes.txt            # no pitch drop
 ```
 
-The output is polished with ffmpeg (warmer EQ, gentle compression, light room sound, -16 LUFS loudness).
+The output is polished with ffmpeg: 2 seconds of lead-in silence, warmer EQ, gentle compression, light room
+sound, -16 LUFS loudness, 48 kHz. MP3s are 320 kbps; WAVs are 24-bit. The `cori` voice gets a 10% pitch drop
+by default (`-d` changes it; other voices default to 0). The pitch drop uses ffmpeg's `rubberband` filter,
+which Debian's ffmpeg includes.
 Small fixes are applied to casual writing: line breaks become spaces, a lone lowercase "i" becomes "I",
 " - " becomes a pause, and sentences start with a capital.
+
+More Linux tools and write-ups by Ben Santora: [truelinux.pages.dev](https://truelinux.pages.dev/)
 
 ## License
 

@@ -6,6 +6,8 @@
 #   echo "hello" | speak - hi.mp3   -> text from a pipe
 #   speak -p notes.txt              -> also play it when done
 #   speak -v lessac notes.txt       -> other voice: cori (default), lessac, hfc, amy
+#   speak -d 5 notes.txt            -> lower the pitch by 5% (speed unchanged); default is 10 for cori, 0 for other voices
+#   speak -d 0 notes.txt            -> no pitch drop at all
 #
 # Piper lives in ~/.local/share/piper, voices in ~/.local/share/piper/voices.
 set -euo pipefail
@@ -13,16 +15,18 @@ set -euo pipefail
 PIPER_DIR="${PIPER_DIR:-$HOME/.local/share/piper}"
 voice="cori"
 play=0
+drop=""
 
-while getopts "v:ph" opt; do
+while getopts "v:d:ph" opt; do
     case $opt in
         v) voice=$OPTARG ;;
+        d) drop=$OPTARG ;;
         p) play=1 ;;
-        *) sed -n '2,10s/^# \{0,1\}//p' "$0"; exit 0 ;;
+        *) sed -n '2,12s/^# \{0,1\}//p' "$0"; exit 0 ;;
     esac
 done
 shift $((OPTIND - 1))
-[ $# -ge 1 ] || { sed -n '2,10s/^# \{0,1\}//p' "$0"; exit 1; }
+[ $# -ge 1 ] || { sed -n '2,12s/^# \{0,1\}//p' "$0"; exit 1; }
 
 case $voice in
     cori)   model=en_GB-cori-high ;;           # British female (voice #5)
@@ -31,6 +35,11 @@ case $voice in
     amy)    model=en_US-amy-medium ;;          # US female, warm and clear
     *)      model=$voice ;;                    # any other model name in ~/.local/share/piper/voices
 esac
+
+# Default pitch drop: 10% for cori, none for the other voices (override with -d)
+if [ -z "$drop" ]; then
+    [ "$voice" = "cori" ] && drop=10 || drop=0
+fi
 
 input=$1
 if [ "$input" = "-" ]; then
@@ -57,14 +66,18 @@ printf '%s\n' "$text" | "$PIPER_DIR/piper" -m "$PIPER_DIR/voices/$model.onnx" \
     --length_scale 1.07 --noise_scale 0.72 --noise_w 0.95 --sentence_silence 0.35 \
     -f "$tmp/raw.wav" >/dev/null 2>&1
 
-# Studio polish: warmer EQ, gentle compression, a touch of room, -16 LUFS loudness
-polish="highpass=f=70,equalizer=f=180:t=q:w=1:g=2.5,equalizer=f=3200:t=q:w=1.5:g=1.5,\
+# Studio polish: 2s leading silence, warmer EQ, gentle compression, a touch of room, -16 LUFS loudness
+polish="adelay=2000:all=1,highpass=f=70,equalizer=f=180:t=q:w=1:g=2.5,\
 equalizer=f=7500:t=q:w=2:g=-2,acompressor=threshold=-20dB:ratio=3:attack=8:release=150:makeup=2,\
-aecho=0.85:0.6:28|47:0.10|0.06,loudnorm=I=-16:TP=-1.5:LRA=9"
+lowpass=f=10000,aecho=0.85:0.6:28|47:0.10|0.06,loudnorm=I=-16:TP=-1.5:LRA=9,aresample=48000:resampler=soxr:precision=28"
+# Optional pitch drop (-d PERCENT), applied first so the lead-in silence is unaffected
+if [ "$drop" != "0" ]; then
+    polish="rubberband=pitch=$(awk -v d="$drop" 'BEGIN{printf "%.4f", 1-d/100}'),$polish"
+fi
 
 case $out in
-    *.wav) ffmpeg -y -loglevel error -i "$tmp/raw.wav" -af "$polish" -ar 48000 "$out" ;;
-    *)     ffmpeg -y -loglevel error -i "$tmp/raw.wav" -af "$polish" -ar 48000 -c:a libmp3lame -b:a 192k "$out" ;;
+    *.wav) ffmpeg -y -loglevel error -i "$tmp/raw.wav" -af "$polish" -c:a pcm_s24le "$out" ;;
+    *)     ffmpeg -y -loglevel error -i "$tmp/raw.wav" -af "$polish" -c:a libmp3lame -b:a 320k "$out" ;;
 esac
 echo "$out"
 
